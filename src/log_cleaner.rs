@@ -290,9 +290,9 @@ impl LogCleaner {
             if let Some(extension) = path.extension() {
                 let ext_str = extension.to_string_lossy().to_lowercase();
                 let code_extensions = [
-                    "rs", "go", "js", "ts", "py", "java", "cpp", "c", "h", "hpp", "cs", "php",
-                    "rb", "swift", "kt", "scala", "clj", "hs", "ml", "fs", "vb", "pl", "sh", "ps1",
-                    "bat",
+                    ".rs", ".go", ".js", ".ts", ".py", ".java", ".cpp", ".c", ".h", ".hpp", ".cs",
+                    ".php", ".rb", ".swift", ".kt", ".scala", ".clj", ".hs", ".ml", ".fs", ".vb",
+                    ".pl", ".sh", ".ps1", ".bat",
                 ];
                 if code_extensions.contains(&ext_str.as_str()) {
                     return false;
