@@ -329,8 +329,28 @@ impl CacheDetector {
                     return None;
                 }
 
+                // Get the file/directory name for more precise matching
+                let file_name = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("")
+                    .to_lowercase();
+
                 for pattern in &self.config.cache_patterns.temp_patterns {
-                    if self.matches_pattern(&path_str, pattern) {
+                    let pattern_lower = pattern.to_lowercase();
+
+                    // More precise matching for temporary files/directories
+                    let matches = if pattern_lower.contains('*') {
+                        self.matches_pattern(&path_str, &pattern_lower)
+                    } else {
+                        // For exact patterns, match against file/directory name or path components
+                        file_name == pattern_lower
+                            || path_str
+                                .split('/')
+                                .any(|component| component == pattern_lower)
+                    };
+
+                    if matches {
                         let last_modified = std::fs::metadata(&path)
                             .ok()
                             .and_then(|m| m.modified().ok());
@@ -390,7 +410,16 @@ impl CacheDetector {
             }
             true
         } else {
-            path_str.contains(pattern)
+            // For patterns without wildcards, be more specific
+            // Check if it's a directory name or file name match
+            let path_parts: Vec<&str> = path_str.split('/').collect();
+
+            // Check if any path component exactly matches the pattern
+            // or if the pattern matches the entire path
+            path_parts.contains(&pattern) ||
+            path_str == pattern ||
+            // Allow substring match for patterns that start with '.' (like .cache, .tmp)
+            (pattern.starts_with('.') && path_str.contains(pattern))
         }
     }
 
