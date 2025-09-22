@@ -1,4 +1,4 @@
-use rand::distributions::Alphanumeric;
+use rand::distr::Alphanumeric;
 use rand::{Rng, RngCore, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use std::{
@@ -118,24 +118,25 @@ impl CacheGenerator {
             "mesa_shader_cache",
         ];
 
-        let mut rng = ChaCha8Rng::from_entropy();
-        let num_apps = rng.gen_range(8..=15);
+        let mut system_rng = rand::rng();
+        let mut rng = ChaCha8Rng::from_rng(&mut system_rng);
+        let num_apps = rng.random_range(8..=15);
         let mut created_dirs = Vec::new();
 
         for _ in 0..num_apps {
-            let app_name = app_names[rng.gen_range(0..app_names.len())];
+            let app_name = app_names[rng.random_range(0..app_names.len())];
             let mut app_dir = self.cache_dir.join(app_name);
 
             // Add version subdirectory sometimes
-            if rng.gen_bool(0.33) {
-                let version = format!("v{}.{}", rng.gen_range(1..10), rng.gen_range(0..20));
+            if rng.random_bool(0.33) {
+                let version = format!("v{}.{}", rng.random_range(1..10), rng.random_range(0..20));
                 app_dir = app_dir.join(version);
             }
 
             // Add cache subdirectory sometimes
-            if rng.gen_bool(0.5) {
+            if rng.random_bool(0.5) {
                 let subdirs = ["cache", "tmp", "data", "logs", "session", "storage"];
-                let subdir = subdirs[rng.gen_range(0..subdirs.len())];
+                let subdir = subdirs[rng.random_range(0..subdirs.len())];
                 app_dir = app_dir.join(subdir);
             }
 
@@ -158,7 +159,7 @@ impl CacheGenerator {
     fn generate_random_hex_with_rng(rng: &mut ChaCha8Rng, length: usize) -> String {
         const HEX_CHARS: &[u8] = b"abcdef0123456789";
         (0..length)
-            .map(|_| HEX_CHARS[rng.gen_range(0..HEX_CHARS.len())] as char)
+            .map(|_| HEX_CHARS[rng.random_range(0..HEX_CHARS.len())] as char)
             .collect()
     }
 
@@ -258,7 +259,8 @@ impl CacheGenerator {
         progress_counter: Arc<AtomicU64>,
     ) -> u64 {
         let mut total_generated = 0u64;
-        let mut rng = ChaCha8Rng::from_entropy(); // Thread-local RNG for better performance
+        // Use seed_from_u64 with a random seed for thread-local RNG
+        let mut rng = ChaCha8Rng::seed_from_u64(rand::random());
 
         loop {
             // Get a batch of tasks to process
@@ -307,7 +309,7 @@ impl CacheGenerator {
 
     /// Generate tasks for file creation (pre-compute what files to create)
     fn generate_file_tasks(&self, directories: &[PathBuf]) -> Vec<FileTask> {
-        let mut rng = ChaCha8Rng::from_entropy();
+        let mut rng = ChaCha8Rng::seed_from_u64(rand::random());
         let mut tasks = Vec::new();
         let size_per_dir = self.target_size / directories.len() as u64;
 
@@ -337,8 +339,8 @@ impl CacheGenerator {
                     break;
                 }
 
-                let file_size = rng.gen_range(MIN_FILE_SIZE..=remaining.min(MAX_FILE_SIZE));
-                let file_type = file_types[rng.gen_range(0..file_types.len())].clone();
+                let file_size = rng.random_range(MIN_FILE_SIZE..=remaining.min(MAX_FILE_SIZE));
+                let file_type = file_types[rng.random_range(0..file_types.len())].clone();
 
                 tasks.push(FileTask {
                     dir: dir.clone(),
