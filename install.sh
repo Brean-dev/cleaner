@@ -13,8 +13,7 @@ NC='\033[0m' # No Color
 REPO="Brean-dev/cleaner"
 GITHUB_API="https://api.github.com/repos/$REPO"
 
-echo -e "${GREEN}Cleaner Installation Script${NC}"
-echo "=============================="
+echo -e "${GREEN}Downloading 'cleaner' package${NC}"
 
 # Function to print colored output
 print_status() {
