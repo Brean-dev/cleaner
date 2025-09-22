@@ -4,12 +4,13 @@ permissions:
   contents: write
 
 on:
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Tag for this build'
-        required: true
-        default: 'v0.1.0'
+  push:
+    tags:
+      - v[0-9]+.*
+env:
+  CARGO_PROFILE_RELEASE_LTO: true
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
+
 
 jobs:
   create-release:

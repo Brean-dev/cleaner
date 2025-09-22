@@ -14,3 +14,7 @@ colored = "3.0.0"
 members = [
     "tools/cache_generator"
 ]
+
+[profile.release]
+lto = true
+strip = "symbols"
