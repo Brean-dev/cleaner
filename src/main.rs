@@ -2,7 +2,11 @@ use std::{env, fs, io, io::Write, path::Path};
 use walkdir::{DirEntry, WalkDir};
 
 fn has_cache_in_path(entry: &DirEntry) -> bool {
-    entry.file_type().is_dir() && entry.path().to_string_lossy().contains(".cache")
+    let substrings = [".cache"];
+    entry.file_type().is_dir()
+        && substrings
+            .iter()
+            .any(|s| entry.path().to_string_lossy().contains(s))
 }
 
 fn collect_cache_dirs<P: AsRef<Path>>(root: P) -> Vec<String> {
@@ -21,7 +25,7 @@ fn collect_cache_dirs<P: AsRef<Path>>(root: P) -> Vec<String> {
 
 // Only keep the top-most directories (not nested inside another .cache dir)
 fn top_level_cache_dirs(mut dirs: Vec<String>) -> Vec<String> {
-    dirs.sort_by(|a, b| a.len().cmp(&b.len()));
+    dirs.sort_by_key(|a| a.len());
     let mut top_level = Vec::new();
     for dir in dirs {
         if !top_level
@@ -34,12 +38,12 @@ fn top_level_cache_dirs(mut dirs: Vec<String>) -> Vec<String> {
     top_level
 }
 
-fn total_size<P: AsRef<Path>>(paths: &[P]) -> u64 {
+fn total_size<P: AsRef<std::path::Path>>(paths: &[P]) -> u64 {
     let mut total = 0u64;
     for p in paths {
         for entry in WalkDir::new(p).into_iter().filter_map(|e| e.ok()) {
-            if entry.file_type().is_file() {
-                if let Ok(meta) = entry.metadata() {
+            if let Ok(meta) = entry.metadata() {
+                if entry.file_type().is_file() {
                     total += meta.len();
                 }
             }
