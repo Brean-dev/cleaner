@@ -299,6 +299,21 @@ impl CacheDetector {
                     return None;
                 }
 
+                // Check if this is a code file that should be excluded
+                if let Some(extension) = path.extension()
+                    && let Some(ext_str) = extension.to_str()
+                {
+                    let ext_str = format!(".{}", ext_str.to_lowercase());
+                    let code_extensions = [
+                        ".rs", ".go", ".js", ".ts", ".py", ".java", ".cpp", ".c", ".h", ".hpp",
+                        ".cs", ".php", ".rb", ".swift", ".kt", ".scala", ".clj", ".hs", ".ml",
+                        ".fs", ".vb", ".pl", ".sh", ".ps1", ".bat",
+                    ];
+                    if code_extensions.contains(&ext_str.as_str()) {
+                        return None;
+                    }
+                }
+
                 for pattern in &self.config.cache_patterns.temp_patterns {
                     if self.matches_pattern(&path_str, pattern) {
                         let last_modified = std::fs::metadata(&path)
