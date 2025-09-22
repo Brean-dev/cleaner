@@ -1,3 +1,4 @@
+use colored::*;
 use std::{
     env, fs,
     io::{self, Write},
@@ -81,9 +82,10 @@ fn human_size(bytes: u64) -> String {
     format!("{:.2} {}", size, UNITS[unit_index])
 }
 
-/// Prompt user for yes/no confirmation
+/// Prompt user for yes/no confirmation with enhanced formatting
 fn prompt_yes_no(prompt: &str) -> io::Result<bool> {
-    print!("{}", prompt);
+    println!("{}", "WARNING".bold().red());
+    print!("{} {} ", prompt, "[y/N]:".dimmed());
     io::stdout().flush()?;
 
     let mut input = String::new();
@@ -93,24 +95,102 @@ fn prompt_yes_no(prompt: &str) -> io::Result<bool> {
     Ok(matches!(response.as_str(), "y" | "yes"))
 }
 
-/// Clean (delete) the specified cache directories
+/// Display cache directories with individual sizes
+fn display_cache_dirs(dirs: &[PathBuf]) {
+    println!(
+        "\n{} {}",
+        "FOUND".bold().blue(),
+        format!("{} top-level cache directories:", dirs.len()).bold()
+    );
+
+    for (i, dir) in dirs.iter().enumerate() {
+        let dir_size = total_size(&[dir]);
+        println!(
+            "  {}. {} {}",
+            (i + 1).to_string().dimmed(),
+            dir.display().to_string().white(),
+            format!("({})", human_size(dir_size)).red()
+        );
+    }
+}
+
+/// Clean cache directories with progress indication
 fn clean_cache_dirs(dirs: &[PathBuf]) -> Vec<(PathBuf, Result<(), io::Error>)> {
+    let total = dirs.len();
     dirs.iter()
-        .map(|dir| {
+        .enumerate()
+        .map(|(i, dir)| {
+            print!(
+                "  {} Removing {} [{}/{}]",
+                "DELETING".red(),
+                dir.display(),
+                i + 1,
+                total
+            );
+            io::stdout().flush().unwrap();
+
             let result = fs::remove_dir_all(dir);
+
+            match &result {
+                Ok(()) => println!(" {}", "SUCCESS".green()),
+                Err(_) => println!(" {}", "FAILED".red()),
+            }
+
             (dir.clone(), result)
         })
         .collect()
 }
 
-/// Display cleaning results
+/// Display cleaning results with better formatting
 fn display_cleaning_results(results: &[(PathBuf, Result<(), io::Error>)]) {
+    println!("\n{}", "CLEANING RESULTS:".bold().blue());
+
+    let mut success_count = 0;
+    let mut failure_count = 0;
+
     for (dir, result) in results {
         match result {
-            Ok(()) => println!("Removed: {}", dir.display()),
-            Err(e) => eprintln!("Failed to remove {}: {}", dir.display(), e),
+            Ok(()) => {
+                success_count += 1;
+                println!(
+                    "  {} {}",
+                    "SUCCESS".green(),
+                    dir.display().to_string().dimmed()
+                );
+            }
+            Err(e) => {
+                failure_count += 1;
+                println!(
+                    "  {} {} - {}",
+                    "FAILED".red(),
+                    dir.display(),
+                    e.to_string().red()
+                );
+            }
         }
     }
+
+    println!(
+        "\n{} {} {} {}",
+        "SUMMARY:".bold().blue(),
+        format!("{} successful", success_count).green().bold(),
+        "|".dimmed(),
+        format!("{} failed", failure_count).red().bold()
+    );
+}
+
+/// Display summary box with key information
+fn display_summary(cache_dirs: &[PathBuf], total_size_bytes: u64, root: &str) {
+    println!("\n");
+    println!("Scan path: {}", root.green());
+    println!(
+        "Directories found: {}",
+        cache_dirs.len().to_string().yellow().bold()
+    );
+    println!(
+        "Total size: {}",
+        human_size(total_size_bytes).yellow().bold()
+    );
 }
 
 fn main() -> io::Result<()> {
@@ -118,55 +198,52 @@ fn main() -> io::Result<()> {
     let root = args.get(1).map(String::as_str).unwrap_or("/");
     let clean_mode = args.iter().any(|arg| arg == "--clean");
 
-    println!("Scanning for cache directories under '{}'...", root);
+    println!(
+        "{}",
+        format!("Scanning for cache directories under '{}'...", root)
+            .white()
+            .dimmed()
+    );
 
     let found_dirs = collect_cache_dirs(root);
     let cache_dirs = top_level_cache_dirs(found_dirs);
 
     if cache_dirs.is_empty() {
-        println!("No directories containing '.cache' found under '{}'", root);
+        println!(
+            "{}",
+            format!("No directories containing '.cache' found under '{}'", root).green()
+        );
         return Ok(());
     }
 
     let total_size_bytes = total_size(&cache_dirs);
 
-    println!(
-        "\nFound {} top-level cache directories under '{}':",
-        cache_dirs.len(),
-        root
-    );
+    // Display directories with individual sizes
+    display_cache_dirs(&cache_dirs);
 
-    for dir in &cache_dirs {
-        println!("  {}", dir.display());
-    }
-
-    println!("\nTotal size: {}", human_size(total_size_bytes));
+    // Display summary
+    display_summary(&cache_dirs, total_size_bytes, root);
 
     if clean_mode {
         let prompt = format!(
-            "\nAre you sure you want to delete all {} cache directories totaling {}? (y/N): ",
+            "\nAre you sure you want to delete all {} cache directories totaling {}?",
             cache_dirs.len(),
             human_size(total_size_bytes)
         );
 
         match prompt_yes_no(&prompt)? {
             true => {
-                println!("\nCleaning cache directories...");
+                println!("\n{}", "Cleaning cache directories...".bold().yellow());
                 let results = clean_cache_dirs(&cache_dirs);
                 display_cleaning_results(&results);
-
-                let successful_cleanups =
-                    results.iter().filter(|(_, result)| result.is_ok()).count();
-                println!(
-                    "\nSuccessfully cleaned {}/{} directories",
-                    successful_cleanups,
-                    cache_dirs.len()
-                );
             }
-            false => println!("Cleaning aborted."),
+            false => println!("{}", "Cleaning aborted.".yellow()),
         }
     } else {
-        println!("\nUse --clean flag to delete these directories.");
+        println!(
+            "\n{}",
+            "Use --clean flag to delete these directories.".dimmed()
+        );
     }
 
     Ok(())
