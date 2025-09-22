@@ -132,6 +132,23 @@ impl CacheDetector {
         }
     }
 
+    /// Check if a file should be excluded based on its extension
+    fn is_code_file(&self, path: &Path) -> bool {
+        if let Some(extension) = path.extension()
+            && let Some(ext_str) = extension.to_str()
+        {
+            let ext_str = format!(".{}", ext_str.to_lowercase());
+            let code_extensions = [
+                ".rs", ".go", ".js", ".ts", ".py", ".java", ".cpp", ".c", ".h", ".hpp", ".cs",
+                ".php", ".rb", ".swift", ".kt", ".scala", ".clj", ".hs", ".ml", ".fs", ".vb",
+                ".pl", ".sh", ".ps1", ".bat", ".toml", ".yaml", ".yml", ".json", ".xml", ".md",
+                ".txt", ".cfg", ".ini", ".conf",
+            ];
+            return code_extensions.contains(&ext_str.as_str());
+        }
+        false
+    }
+
     /// Classify a directory entry as a cache item
     fn classify_directory_entry(
         &self,
@@ -143,6 +160,11 @@ impl CacheDetector {
 
         // Skip excluded paths
         if self.config.is_excluded_path(&path) {
+            return Ok(None);
+        }
+
+        // Skip code files - don't treat them as cache items
+        if entry.file_type().is_file() && self.is_code_file(&path) {
             return Ok(None);
         }
 
@@ -245,7 +267,10 @@ impl CacheDetector {
         for pattern in &self.config.cache_patterns.build_artifacts {
             if let Ok(paths) = glob(&format!("{}/{}", root.display(), pattern)) {
                 for path in paths.flatten() {
-                    if path.exists() && !self.config.is_excluded_path(&path) {
+                    if path.exists()
+                        && !self.config.is_excluded_path(&path)
+                        && !self.is_code_file(&path)
+                    {
                         items.push(CacheItem {
                             path,
                             cache_type: CacheType::BuildArtifact,
@@ -299,19 +324,9 @@ impl CacheDetector {
                     return None;
                 }
 
-                // Check if this is a code file that should be excluded
-                if let Some(extension) = path.extension()
-                    && let Some(ext_str) = extension.to_str()
-                {
-                    let ext_str = format!(".{}", ext_str.to_lowercase());
-                    let code_extensions = [
-                        ".rs", ".go", ".js", ".ts", ".py", ".java", ".cpp", ".c", ".h", ".hpp",
-                        ".cs", ".php", ".rb", ".swift", ".kt", ".scala", ".clj", ".hs", ".ml",
-                        ".fs", ".vb", ".pl", ".sh", ".ps1", ".bat",
-                    ];
-                    if code_extensions.contains(&ext_str.as_str()) {
-                        return None;
-                    }
+                // Skip code files
+                if self.is_code_file(&path) {
+                    return None;
                 }
 
                 for pattern in &self.config.cache_patterns.temp_patterns {
