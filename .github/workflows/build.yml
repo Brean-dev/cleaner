@@ -28,6 +28,7 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
+          profile: minimal
           override: true
 
       - name: Install dependencies
@@ -202,5 +203,6 @@ jobs:
           generate_release_notes: true
           draft: false
           prerelease: false
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
