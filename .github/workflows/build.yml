@@ -13,6 +13,7 @@ on:
           description: 'Tag for this build'
           required: true
           default: 'v0.1.0'
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -22,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Important for GoReleaser to fetch all tags
+          fetch-depth: 0
 
       - name: Install Rust
         uses: actions-rs/toolchain@v1
@@ -31,96 +32,100 @@ jobs:
           profile: minimal
           override: true
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y jq
-
-      - name: Add build targets
-        run: |
-          rustup target add x86_64-unknown-linux-gnu
-          rustup target add x86_64-unknown-linux-musl
-          rustup target add aarch64-unknown-linux-gnu
-          rustup target add aarch64-unknown-linux-musl
-
+      # Cache everything first
       - name: Cache Cargo registry & index
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: cargo-${{ hashFiles('**/Cargo.lock') }}
+            target/
+          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
 
-      # Install cross-compilation tools
-      - name: Install cross-compilation dependencies
+      - name: Cache Zig installation
+        id: cache-zig
+        uses: actions/cache@v4
+        with:
+          path: /opt/zig
+          key: zig-0.10.0-linux-x86_64
+
+      # Install dependencies in parallel where possible
+      - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu musl-tools
+          sudo apt-get install -y jq gcc-aarch64-linux-gnu musl-tools rpm
 
-      # Install Zig for cross-compilation
+      # Only install Zig if not cached
       - name: Install Zig
+        if: steps.cache-zig.outputs.cache-hit != 'true'
         run: |
-          wget https://ziglang.org/download/0.10.0/zig-linux-x86_64-0.10.0.tar.xz
+          wget -q https://ziglang.org/download/0.10.0/zig-linux-x86_64-0.10.0.tar.xz
           tar -xf zig-linux-x86_64-0.10.0.tar.xz
           sudo mv zig-linux-x86_64-0.10.0 /opt/zig
-          sudo ln -s /opt/zig/zig /usr/local/bin/zig
           rm -rf zig-linux-x86_64-0.10.0.tar.xz
-          zig version
 
+      - name: Setup Zig PATH
+        run: sudo ln -sf /opt/zig/zig /usr/local/bin/zig
+
+      # Cache cargo-zigbuild
       - name: Install cargo-zigbuild
-        run: cargo install cargo-zigbuild
+        run: |
+          if ! command -v cargo-zigbuild &> /dev/null; then
+            cargo install cargo-zigbuild
+          fi
 
-      # Build static binaries
+      - name: Add build targets
+        run: |
+          rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
+
+      # Build both targets in one step
       - name: Build static binaries
         run: |
-          # x86_64 static binary
-          cargo zigbuild --release --target x86_64-unknown-linux-musl
+          cargo zigbuild --release --target x86_64-unknown-linux-musl --target aarch64-unknown-linux-musl
 
-          # aarch64 static binary
-          cargo zigbuild --release --target aarch64-unknown-linux-musl
-
-          # List built binaries for debugging
-          find target/ -name "*" -type f -executable
-          ls -la target/x86_64-unknown-linux-musl/release/
-          ls -la target/aarch64-unknown-linux-musl/release/
-
-      # Create directories for packaging
-      - name: Prepare packaging directories
+      # Combine packaging steps and run in parallel where possible
+      - name: Prepare all packages
         run: |
-          mkdir -p dist/bin
-          mkdir -p dist/deb/DEBIAN
-          mkdir -p dist/deb/usr/bin
-          mkdir -p dist/rpm
-
-          # Copy binaries
-          cp target/x86_64-unknown-linux-musl/release/$BINARY_NAME dist/bin/$BINARY_NAME-x86_64-linux
-          cp target/aarch64-unknown-linux-musl/release/$BINARY_NAME dist/bin/$BINARY_NAME-aarch64-linux
-
-          # Make binaries executable
-          chmod +x dist/bin/*
-
-      # Create Debian package
-      - name: Create Debian package
-        run: |
-          # Get version from tag or use Cargo.toml version
+          # Get version once
           if [[ $GITHUB_REF == refs/tags/v* ]]; then
             VERSION=${GITHUB_REF#refs/tags/v}
+          elif [[ -n "${{ github.event.inputs.tag }}" ]]; then
+            VERSION=${{ github.event.inputs.tag }}
+            VERSION=${VERSION#v}  # Remove 'v' prefix if present
           else
             VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
           fi
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
 
-          # Extract package info from Cargo.toml
+          # Get metadata once
           DESCRIPTION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].description')
           AUTHORS=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].authors[0]')
           REPOSITORY=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].repository')
+          LICENSE=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].license')
 
-          echo "Building Debian package for version: $VERSION"
+          echo "DESCRIPTION=$DESCRIPTION" >> $GITHUB_ENV
+          echo "AUTHORS=$AUTHORS" >> $GITHUB_ENV
+          echo "REPOSITORY=$REPOSITORY" >> $GITHUB_ENV
+          echo "LICENSE=$LICENSE" >> $GITHUB_ENV
 
-          # Copy binary for deb package
-          cp target/x86_64-unknown-linux-musl/release/${BINARY_NAME} dist/deb/usr/bin/
+          # Create all directories
+          mkdir -p dist/{bin,deb/DEBIAN,deb/usr/bin,rpm}
+          mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 
-          # Create Debian control file
-          cat > dist/deb/DEBIAN/control << EOF
+          # Copy and prepare binaries
+          cp target/x86_64-unknown-linux-musl/release/$BINARY_NAME dist/bin/$BINARY_NAME-x86_64-linux
+          cp target/aarch64-unknown-linux-musl/release/$BINARY_NAME dist/bin/$BINARY_NAME-aarch64-linux
+          cp target/x86_64-unknown-linux-musl/release/$BINARY_NAME dist/deb/usr/bin/
+          chmod +x dist/bin/* dist/deb/usr/bin/*
+
+      # Create packages in parallel using background processes
+      - name: Create packages
+        run: |
+          # Create DEB package in background
+          (
+            cat > dist/deb/DEBIAN/control << EOF
           Package: ${BINARY_NAME}
           Version: ${VERSION}
           Section: utils
@@ -130,35 +135,12 @@ jobs:
           Description: ${DESCRIPTION}
            ${DESCRIPTION}.
           EOF
+            dpkg-deb --build dist/deb dist/${BINARY_NAME}_${VERSION}_amd64.deb
+          ) &
 
-          # Build the deb package
-          dpkg-deb --build dist/deb dist/${BINARY_NAME}_${VERSION}_amd64.deb
-
-      # Create RPM package
-      - name: Create RPM package
-        run: |
-          # Install rpm tools
-          sudo apt-get install -y rpm
-
-          # Get version from tag or use Cargo.toml version
-          if [[ $GITHUB_REF == refs/tags/v* ]]; then
-            VERSION=${GITHUB_REF#refs/tags/v}
-          else
-            VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
-          fi
-
-          # Extract package info from Cargo.toml
-          DESCRIPTION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].description')
-          AUTHORS=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].authors[0]')
-          REPOSITORY=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].repository')
-          LICENSE=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].license')
-
-          echo "Building RPM package for version: $VERSION"
-
-          # Create RPM spec file
-          mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
-
-          cat > ~/rpmbuild/SPECS/${BINARY_NAME}.spec << EOF
+          # Create RPM package in background
+          (
+            cat > ~/rpmbuild/SPECS/${BINARY_NAME}.spec << EOF
           Name:           ${BINARY_NAME}
           Version:        ${VERSION}
           Release:        1%{?dist}
@@ -171,11 +153,8 @@ jobs:
           %description
           ${DESCRIPTION}.
 
-
           %prep
-
           %build
-
           %install
           mkdir -p %{buildroot}/usr/bin
           cp $GITHUB_WORKSPACE/target/x86_64-unknown-linux-musl/release/${BINARY_NAME} %{buildroot}/usr/bin/
@@ -187,12 +166,13 @@ jobs:
           * $(date +'%a %b %d %Y') ${AUTHORS} <noreply@github.com> - ${VERSION}-1
           - Automated build from version ${VERSION}
           EOF
+            rpmbuild -bb ~/rpmbuild/SPECS/${BINARY_NAME}.spec
+            cp ~/rpmbuild/RPMS/x86_64/${BINARY_NAME}-${VERSION}-1.*.rpm dist/
+          ) &
 
-          # Build RPM
-          rpmbuild -bb ~/rpmbuild/SPECS/${BINARY_NAME}.spec
-          cp ~/rpmbuild/RPMS/x86_64/${BINARY_NAME}-${VERSION}-1.*.rpm dist/
+          # Wait for both background jobs to complete
+          wait
 
-      # Upload artifacts and create release
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
