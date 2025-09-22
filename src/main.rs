@@ -31,6 +31,7 @@ fn build_cli() -> Command {
                 .help("Actually delete the found cache directories")
                 .action(clap::ArgAction::SetTrue),
         )
+    // Removed version
 }
 
 /// Check if running with root privileges
