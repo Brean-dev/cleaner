@@ -64,7 +64,7 @@ impl CacheGenerator {
             "gnome", "kde", "xfce", "i3", "awesome",
             "thumbnails", "fontconfig", "mesa_shader_cache",
         ];
-
+        #[allow(unused_variables)]
         let mut rng = ChaCha8Rng::from_entropy();
         let num_apps = rng.gen_range(8..=15);
         let mut created_dirs = Vec::new();
@@ -168,7 +168,6 @@ impl CacheGenerator {
     }
 
     fn generate_file(&self, dir: &Path, file_type: FileType, target_size: u64) -> io::Result<u64> {
-        let mut rng = ChaCha8Rng::from_entropy();
         
         let (filename, extension) = match file_type {
             FileType::Binary => (format!("cache_{}", Self::generate_random_hex(16)), "bin"),
