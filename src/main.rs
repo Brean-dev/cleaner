@@ -3,28 +3,169 @@ use std::{
     env, fs,
     io::{self, Write},
     path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+    thread,
 };
 use walkdir::{DirEntry, WalkDir};
 
-/// Check if a directory entry contains cache-related patterns in its path
-fn has_cache_in_path(entry: &DirEntry) -> bool {
-    const CACHE_PATTERNS: &[&str] = &[".cache"];
-
-    entry.file_type().is_dir()
-        && CACHE_PATTERNS
-            .iter()
-            .any(|pattern| entry.path().to_string_lossy().contains(pattern))
+/// Check if running with root privileges
+fn check_root_privileges() -> bool {
+    // Check if running as root (UID 0)
+    unsafe { libc::getuid() == 0 }
 }
 
-/// Collect all cache directories under the given root path
+/// Check if a directory entry contains cache-related patterns in its path
+fn has_cache_in_path(entry: &DirEntry) -> bool {
+    const CACHE_PATTERNS: &[&str] = &[".cache", "tmp", "temp"];
+
+    // Check if it's a directory first
+    if !entry.file_type().is_dir() {
+        return false;
+    }
+
+    // Get path components and check if any match our cache patterns exactly
+    entry
+        .path()
+        .components()
+        .filter_map(|comp| comp.as_os_str().to_str())
+        .any(|component| CACHE_PATTERNS.contains(&component))
+}
+
+/// Try to access a directory and return if it's accessible
+fn is_dir_accessible(path: &Path) -> bool {
+    match fs::read_dir(path) {
+        Ok(_) => true,
+        Err(e) => {
+            if e.kind() == io::ErrorKind::PermissionDenied {
+                false
+            } else {
+                true // Other errors might be temporary, so we consider it accessible
+            }
+        }
+    }
+}
+
+/// Collect all cache directories under the given root path using multiple threads
 fn collect_cache_dirs<P: AsRef<Path>>(root: P) -> Vec<PathBuf> {
-    WalkDir::new(root)
-        .min_depth(1)
-        .into_iter()
-        .filter_map(Result::ok)
-        .filter(has_cache_in_path)
-        .map(|entry| entry.into_path())
-        .collect()
+    let root_path = root.as_ref().to_path_buf();
+
+    // Get available parallelism for optimal thread count
+    let thread_count = thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .min(8); // Cap at 8 threads to avoid overwhelming the system
+
+    // Collect top-level directories first
+    let top_level_dirs: Vec<PathBuf> = fs::read_dir(&root_path)
+        .map(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .filter(|entry| {
+                    entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false)
+                        && is_dir_accessible(&entry.path())
+                })
+                .map(|entry| entry.path())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    if top_level_dirs.is_empty() {
+        return Vec::new();
+    }
+
+    // Shared result collection using Arc<Mutex<Vec<PathBuf>>>
+    let results = Arc::new(Mutex::new(Vec::new()));
+    let inaccessible_dirs = Arc::new(Mutex::new(Vec::new()));
+    let mut handles = Vec::new();
+
+    // Distribute directories among threads
+    let chunk_size = top_level_dirs.len().div_ceil(thread_count);
+
+    for chunk in top_level_dirs.chunks(chunk_size) {
+        let chunk_dirs = chunk.to_vec();
+        let results_clone = Arc::clone(&results);
+        let inaccessible_clone = Arc::clone(&inaccessible_dirs);
+
+        let handle = thread::spawn(move || {
+            let mut local_results = Vec::new();
+            let mut local_inaccessible = Vec::new();
+
+            for dir in chunk_dirs {
+                // Walk each directory and collect cache dirs
+                for entry in WalkDir::new(&dir)
+                    .min_depth(1)
+                    .into_iter()
+                    .filter_map(|e| match e {
+                        Ok(entry) => Some(entry),
+                        Err(err) => {
+                            // Log permission errors but continue
+                            if err.io_error().map(|e| e.kind())
+                                == Some(io::ErrorKind::PermissionDenied)
+                                && let Some(path) = err.path()
+                            {
+                                local_inaccessible.push(path.to_path_buf());
+                            }
+                            None
+                        }
+                    })
+                    .filter(has_cache_in_path)
+                {
+                    local_results.push(entry.into_path());
+                }
+            }
+
+            // Lock and merge results
+            if let Ok(mut global_results) = results_clone.lock() {
+                global_results.extend(local_results);
+            }
+
+            if let Ok(mut global_inaccessible) = inaccessible_clone.lock() {
+                global_inaccessible.extend(local_inaccessible);
+            }
+        });
+
+        handles.push(handle);
+    }
+
+    // Wait for all threads to complete
+    for handle in handles {
+        if let Err(e) = handle.join() {
+            eprintln!("Thread panicked: {:?}", e);
+        }
+    }
+
+    // Show permission warnings if not running as root
+    if !check_root_privileges() {
+        let inaccessible = Arc::try_unwrap(inaccessible_dirs)
+            .unwrap_or_else(|_| panic!("Failed to unwrap inaccessible_dirs"))
+            .into_inner()
+            .unwrap_or_else(|_| panic!("Failed to acquire mutex"));
+
+        if !inaccessible.is_empty() {
+            println!(
+                "\n{} {} directories were inaccessible due to permission restrictions:",
+                "WARNING".bold().yellow(),
+                inaccessible.len()
+            );
+            for dir in inaccessible.iter().take(5) {
+                println!("  {}", dir.display().to_string().dimmed());
+            }
+            if inaccessible.len() > 5 {
+                println!("  {} ({} more...)", "...".dimmed(), inaccessible.len() - 5);
+            }
+            println!(
+                "{} Run with {} to access all directories.",
+                "TIP:".bold().blue(),
+                "sudo".green().bold()
+            );
+        }
+    }
+
+    // Extract final results
+    Arc::try_unwrap(results)
+        .unwrap_or_else(|_| panic!("Failed to unwrap results"))
+        .into_inner()
+        .unwrap_or_else(|_| panic!("Failed to acquire mutex"))
 }
 
 /// Filter to keep only top-level cache directories (not nested inside others)
@@ -47,19 +188,63 @@ fn top_level_cache_dirs(mut dirs: Vec<PathBuf>) -> Vec<PathBuf> {
     top_level
 }
 
-/// Calculate total size of files in the given paths
+/// Calculate total size of files in the given paths using parallel processing
 fn total_size<P: AsRef<Path>>(paths: &[P]) -> u64 {
-    paths
-        .iter()
-        .flat_map(|path| {
-            WalkDir::new(path)
-                .into_iter()
-                .filter_map(Result::ok)
-                .filter(|entry| entry.file_type().is_file())
-                .filter_map(|entry| entry.metadata().ok())
-                .map(|metadata| metadata.len())
-        })
-        .sum()
+    if paths.is_empty() {
+        return 0;
+    }
+
+    let thread_count = thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .min(paths.len().max(1));
+
+    let total_size = Arc::new(Mutex::new(0u64));
+    let mut handles = Vec::new();
+
+    // Distribute paths among threads
+    let chunk_size = paths.len().div_ceil(thread_count);
+
+    for chunk in paths.chunks(chunk_size) {
+        let chunk_paths: Vec<PathBuf> = chunk.iter().map(|p| p.as_ref().to_path_buf()).collect();
+        let total_size_clone = Arc::clone(&total_size);
+
+        let handle = thread::spawn(move || {
+            let mut local_size = 0u64;
+
+            for path in chunk_paths {
+                for entry in WalkDir::new(path)
+                    .into_iter()
+                    .filter_map(Result::ok)
+                    .filter(|entry| entry.file_type().is_file())
+                {
+                    if let Ok(metadata) = entry.metadata() {
+                        local_size += metadata.len();
+                    }
+                }
+            }
+
+            // Add to global total
+            if let Ok(mut total) = total_size_clone.lock() {
+                *total += local_size;
+            }
+        });
+
+        handles.push(handle);
+    }
+
+    // Wait for all threads to complete
+    for handle in handles {
+        if let Err(e) = handle.join() {
+            eprintln!("Size calculation thread panicked: {:?}", e);
+        }
+    }
+
+    // Return final result
+    Arc::try_unwrap(total_size)
+        .unwrap_or_else(|_| panic!("Failed to unwrap total_size"))
+        .into_inner()
+        .unwrap_or_else(|_| panic!("Failed to acquire mutex"))
 }
 
 /// Format bytes into human-readable size
@@ -95,7 +280,7 @@ fn prompt_yes_no(prompt: &str) -> io::Result<bool> {
     Ok(matches!(response.as_str(), "y" | "yes"))
 }
 
-/// Display cache directories with individual sizes
+/// Display cache directories with individual sizes (calculated in parallel)
 fn display_cache_dirs(dirs: &[PathBuf]) {
     println!(
         "\n{} {}",
@@ -103,8 +288,52 @@ fn display_cache_dirs(dirs: &[PathBuf]) {
         format!("{} top-level cache directories:", dirs.len()).bold()
     );
 
+    // Calculate sizes in parallel for better performance
+    let thread_count = thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .min(dirs.len().max(1));
+
+    let sizes = Arc::new(Mutex::new(vec![0u64; dirs.len()]));
+    let mut handles = Vec::new();
+
+    let chunk_size = dirs.len().div_ceil(thread_count);
+
+    for (chunk_idx, chunk) in dirs.chunks(chunk_size).enumerate() {
+        let chunk_dirs: Vec<PathBuf> = chunk.to_vec();
+        let sizes_clone = Arc::clone(&sizes);
+        let base_idx = chunk_idx * chunk_size;
+
+        let handle = thread::spawn(move || {
+            for (i, dir) in chunk_dirs.iter().enumerate() {
+                let dir_size = total_size(&[dir]);
+
+                if let Ok(mut sizes_vec) = sizes_clone.lock()
+                    && base_idx + i < sizes_vec.len()
+                {
+                    sizes_vec[base_idx + i] = dir_size;
+                }
+            }
+        });
+
+        handles.push(handle);
+    }
+
+    // Wait for all size calculations to complete
+    for handle in handles {
+        if let Err(e) = handle.join() {
+            eprintln!("Display thread panicked: {:?}", e);
+        }
+    }
+
+    // Display results
+    let final_sizes = Arc::try_unwrap(sizes)
+        .unwrap_or_else(|_| panic!("Failed to unwrap sizes"))
+        .into_inner()
+        .unwrap_or_else(|_| panic!("Failed to acquire mutex"));
+
     for (i, dir) in dirs.iter().enumerate() {
-        let dir_size = total_size(&[dir]);
+        let dir_size = final_sizes.get(i).copied().unwrap_or(0);
         println!(
             "  {}. {} {}",
             (i + 1).to_string().dimmed(),
@@ -114,31 +343,95 @@ fn display_cache_dirs(dirs: &[PathBuf]) {
     }
 }
 
-/// Clean cache directories with progress indication
+/// Clean cache directories with progress indication using parallel processing
 fn clean_cache_dirs(dirs: &[PathBuf]) -> Vec<(PathBuf, Result<(), io::Error>)> {
     let total = dirs.len();
-    dirs.iter()
-        .enumerate()
-        .map(|(i, dir)| {
-            print!(
-                "  {} Removing {} [{}/{}]",
-                "DELETING".red(),
-                dir.display(),
-                i + 1,
-                total
-            );
-            io::stdout().flush().unwrap();
+    let results = Arc::new(Mutex::new(Vec::with_capacity(total)));
+    let progress_counter = Arc::new(Mutex::new(0usize));
 
-            let result = fs::remove_dir_all(dir);
+    // Use fewer threads for deletion to avoid overwhelming the filesystem
+    let thread_count = thread::available_parallelism()
+        .map(|n| (n.get() / 2).max(1))
+        .unwrap_or(2)
+        .min(4);
 
-            match &result {
-                Ok(()) => println!(" {}", "SUCCESS".green()),
-                Err(_) => println!(" {}", "FAILED".red()),
+    let mut handles = Vec::new();
+    let chunk_size = dirs.len().div_ceil(thread_count);
+
+    for chunk in dirs.chunks(chunk_size) {
+        let chunk_dirs: Vec<PathBuf> = chunk.to_vec();
+        let results_clone = Arc::clone(&results);
+        let progress_counter_clone = Arc::clone(&progress_counter);
+
+        let handle = thread::spawn(move || {
+            let mut local_results = Vec::new();
+
+            for dir in chunk_dirs {
+                // Update progress counter
+                let current_progress = {
+                    let mut counter = progress_counter_clone.lock().unwrap();
+                    *counter += 1;
+                    *counter
+                };
+
+                print!(
+                    "  {} Removing {} [{}/{}]",
+                    "DELETING".red(),
+                    dir.display(),
+                    current_progress,
+                    total
+                );
+                io::stdout().flush().unwrap();
+
+                // Check if we have permission to delete this directory
+                let result = if is_dir_accessible(&dir) {
+                    fs::remove_dir_all(&dir)
+                } else {
+                    Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        "Permission denied - try running with sudo",
+                    ))
+                };
+
+                match &result {
+                    Ok(()) => println!(" {}", "SUCCESS".green()),
+                    Err(e) => {
+                        if e.kind() == io::ErrorKind::PermissionDenied {
+                            println!(
+                                " {} ({})",
+                                "PERMISSION DENIED".yellow(),
+                                "try sudo".dimmed()
+                            );
+                        } else {
+                            println!(" {}", "FAILED".red());
+                        }
+                    }
+                }
+
+                local_results.push((dir.clone(), result));
             }
 
-            (dir.clone(), result)
-        })
-        .collect()
+            // Merge results
+            if let Ok(mut global_results) = results_clone.lock() {
+                global_results.extend(local_results);
+            }
+        });
+
+        handles.push(handle);
+    }
+
+    // Wait for all deletion threads to complete
+    for handle in handles {
+        if let Err(e) = handle.join() {
+            eprintln!("Deletion thread panicked: {:?}", e);
+        }
+    }
+
+    // Return results in original order
+    Arc::try_unwrap(results)
+        .unwrap_or_else(|_| panic!("Failed to unwrap results"))
+        .into_inner()
+        .unwrap_or_else(|_| panic!("Failed to acquire mutex"))
 }
 
 /// Display cleaning results with better formatting
@@ -146,6 +439,7 @@ fn display_cleaning_results(results: &[(PathBuf, Result<(), io::Error>)]) {
     println!("\n{}", "CLEANING RESULTS:".bold().blue());
 
     let mut success_count = 0;
+    let mut permission_denied_count = 0;
     let mut failure_count = 0;
 
     for (dir, result) in results {
@@ -159,24 +453,46 @@ fn display_cleaning_results(results: &[(PathBuf, Result<(), io::Error>)]) {
                 );
             }
             Err(e) => {
-                failure_count += 1;
-                println!(
-                    "  {} {} - {}",
-                    "FAILED".red(),
-                    dir.display(),
-                    e.to_string().red()
-                );
+                if e.kind() == io::ErrorKind::PermissionDenied {
+                    permission_denied_count += 1;
+                    println!(
+                        "  {} {} - {}",
+                        "PERMISSION DENIED".yellow(),
+                        dir.display(),
+                        "requires elevated privileges".dimmed()
+                    );
+                } else {
+                    failure_count += 1;
+                    println!(
+                        "  {} {} - {}",
+                        "FAILED".red(),
+                        dir.display(),
+                        e.to_string().red()
+                    );
+                }
             }
         }
     }
 
     println!(
-        "\n{} {} {} {}",
+        "\n{} {} {} {} {} {}",
         "SUMMARY:".bold().blue(),
         format!("{} successful", success_count).green().bold(),
         "|".dimmed(),
+        format!("{} permission denied", permission_denied_count)
+            .yellow()
+            .bold(),
+        "|".dimmed(),
         format!("{} failed", failure_count).red().bold()
     );
+
+    if permission_denied_count > 0 {
+        println!(
+            "\n{} Run {} to clean system-wide cache directories.",
+            "TIP:".bold().blue(),
+            "sudo ./cleaner / --clean".green().bold()
+        );
+    }
 }
 
 /// Display summary box with key information
@@ -198,9 +514,48 @@ fn main() -> io::Result<()> {
     let root = args.get(1).map(String::as_str).unwrap_or("/");
     let clean_mode = args.iter().any(|arg| arg == "--clean");
 
+    // Check if scanning system-wide but not running as root
+    if root == "/" && !check_root_privileges() {
+        println!(
+            "{} Scanning system-wide without root privileges.",
+            "WARNING".bold().yellow()
+        );
+        println!(
+            "Some directories may be inaccessible. Run {} for complete access.",
+            "sudo ./cleaner / --clean".green().bold()
+        );
+        println!();
+    }
+
+    // Show privilege information
+    if check_root_privileges() {
+        println!(
+            "{}",
+            "Running with root privileges - full system access enabled."
+                .green()
+                .bold()
+        );
+    } else {
+        println!(
+            "{}",
+            "Running with user privileges - limited to accessible directories.".yellow()
+        );
+    }
+
     println!(
         "{}",
         format!("Scanning for cache directories under '{}'...", root)
+            .white()
+            .dimmed()
+    );
+
+    // Show thread information
+    let thread_count = thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
+    println!(
+        "{}",
+        format!("Using {} threads for parallel processing", thread_count)
             .white()
             .dimmed()
     );
@@ -211,8 +566,15 @@ fn main() -> io::Result<()> {
     if cache_dirs.is_empty() {
         println!(
             "{}",
-            format!("No directories containing '.cache' found under '{}'", root).green()
+            format!("No accessible cache directories found under '{}'", root).green()
         );
+
+        if !check_root_privileges() && root == "/" {
+            println!(
+                "{}",
+                "Try running with sudo to access system-wide cache directories.".dimmed()
+            );
+        }
         return Ok(());
     }
 
@@ -244,6 +606,15 @@ fn main() -> io::Result<()> {
             "\n{}",
             "Use --clean flag to delete these directories.".dimmed()
         );
+
+        if !check_root_privileges() && root == "/" {
+            println!(
+                "{}",
+                "For system-wide cleaning, run: sudo ./cleaner / --clean"
+                    .green()
+                    .bold()
+            );
+        }
     }
 
     Ok(())
