@@ -1,3 +1,6 @@
+use rand::distributions::Alphanumeric;
+use rand::{Rng, RngCore, SeedableRng};
+use rand_chacha::ChaCha8Rng;
 use std::{
     env, fs,
     io::{self, Write},
@@ -6,9 +9,6 @@ use std::{
     thread,
     time::Instant,
 };
-use rand::{Rng, RngCore, SeedableRng};
-use rand::distributions::Alphanumeric;
-use rand_chacha::ChaCha8Rng;
 
 const MAX_TOTAL_SIZE: u64 = 1024 * 1024 * 1024; // 1GB
 const MIN_FILE_SIZE: u64 = 1024; // 1KB
@@ -35,9 +35,9 @@ impl CacheGenerator {
         let home = env::var("HOME").map_err(|_| {
             io::Error::new(io::ErrorKind::NotFound, "HOME environment variable not set")
         })?;
-        
+
         let cache_dir = PathBuf::from(home).join(".cache");
-        
+
         Ok(Self {
             cache_dir,
             total_generated: Arc::new(Mutex::new(0)),
@@ -54,15 +54,49 @@ impl CacheGenerator {
 
     fn create_app_directories(&self) -> io::Result<Vec<PathBuf>> {
         let app_names = [
-            "firefox", "chrome", "chromium", "brave", "opera",
-            "vscode", "atom", "sublime-text", "vim", "emacs",
-            "spotify", "vlc", "gimp", "inkscape", "blender",
-            "discord", "slack", "teams", "zoom", "skype",
-            "steam", "lutris", "wine", "bottles", "heroic",
-            "npm", "pip", "cargo", "composer", "yarn",
-            "docker", "podman", "flatpak", "snap", "appimage",
-            "gnome", "kde", "xfce", "i3", "awesome",
-            "thumbnails", "fontconfig", "mesa_shader_cache",
+            "firefox",
+            "chrome",
+            "chromium",
+            "brave",
+            "opera",
+            "vscode",
+            "atom",
+            "sublime-text",
+            "vim",
+            "emacs",
+            "spotify",
+            "vlc",
+            "gimp",
+            "inkscape",
+            "blender",
+            "discord",
+            "slack",
+            "teams",
+            "zoom",
+            "skype",
+            "steam",
+            "lutris",
+            "wine",
+            "bottles",
+            "heroic",
+            "npm",
+            "pip",
+            "cargo",
+            "composer",
+            "yarn",
+            "docker",
+            "podman",
+            "flatpak",
+            "snap",
+            "appimage",
+            "gnome",
+            "kde",
+            "xfce",
+            "i3",
+            "awesome",
+            "thumbnails",
+            "fontconfig",
+            "mesa_shader_cache",
         ];
         #[allow(unused_variables)]
         let mut rng = ChaCha8Rng::from_entropy();
@@ -113,7 +147,7 @@ impl CacheGenerator {
 
     fn create_file_content(&self, file_type: &FileType, size: u64) -> Vec<u8> {
         let mut rng = ChaCha8Rng::from_entropy();
-        
+
         match file_type {
             FileType::Binary => {
                 let mut data = vec![0u8; size as usize];
@@ -152,9 +186,7 @@ impl CacheGenerator {
                 }
                 content.into_bytes()
             }
-            FileType::Temp => {
-                Self::generate_random_string(size as usize).into_bytes()
-            }
+            FileType::Temp => Self::generate_random_string(size as usize).into_bytes(),
             FileType::Database => {
                 let data_size = if size > 100 { size - 100 } else { 100 };
                 let content = format!(
@@ -168,18 +200,20 @@ impl CacheGenerator {
     }
 
     fn generate_file(&self, dir: &Path, file_type: FileType, target_size: u64) -> io::Result<u64> {
-        
         let (filename, extension) = match file_type {
             FileType::Binary => (format!("cache_{}", Self::generate_random_hex(16)), "bin"),
             FileType::Json => (format!("session_{}", Self::generate_random_hex(8)), "json"),
-            FileType::Log => (format!("app_{}", chrono::Local::now().format("%Y%m%d")), "log"),
+            FileType::Log => (
+                format!("app_{}", chrono::Local::now().format("%Y%m%d")),
+                "log",
+            ),
             FileType::Temp => (format!("tmp_{}", Self::generate_random_hex(12)), "tmp"),
             FileType::Database => ("cache".to_string(), "db"),
         };
 
         let filepath = dir.join(format!("{}.{}", filename, extension));
         let content = self.create_file_content(&file_type, target_size);
-        
+
         fs::write(&filepath, &content)?;
         Ok(content.len() as u64)
     }
@@ -207,20 +241,22 @@ impl CacheGenerator {
             match self.generate_file(&dir, file_type, file_size) {
                 Ok(actual_size) => {
                     current_size += actual_size;
-                    
+
                     // Update global progress
                     {
                         let mut total = self.total_generated.lock().unwrap();
                         *total += actual_size;
-                        
+
                         // Print progress every 10MB
                         if *total % PROGRESS_UPDATE_INTERVAL < actual_size {
                             let progress = (*total * 100) / self.target_size;
                             let progress_bar = "#".repeat((progress / 5) as usize);
-                            print!("\rProgress: [{:<20}] {}% ({})", 
-                                   progress_bar, 
-                                   progress, 
-                                   human_readable_size(*total));
+                            print!(
+                                "\rProgress: [{:<20}] {}% ({})",
+                                progress_bar,
+                                progress,
+                                human_readable_size(*total)
+                            );
                             io::stdout().flush().unwrap();
                         }
                     }
@@ -254,16 +290,14 @@ impl CacheGenerator {
             let dir = dir.clone();
             let generator = self.clone();
             let mut target_size = size_per_dir;
-            
+
             // Give the last directory any remaining size
             if i == directories.len() - 1 {
                 let used_size = size_per_dir * (directories.len() - 1) as u64;
                 target_size = self.target_size - used_size;
             }
 
-            let handle = thread::spawn(move || {
-                generator.populate_directory(dir, target_size)
-            });
+            let handle = thread::spawn(move || generator.populate_directory(dir, target_size));
             handles.push(handle);
         }
 
@@ -279,21 +313,28 @@ impl CacheGenerator {
 
         println!(); // New line after progress bar
         let duration = start_time.elapsed();
-        
-        println!("\x1b[32m[SUCCESS]\x1b[0m Generated {} in {} directories",
-                 human_readable_size(total_actual),
-                 directories.len());
-        println!("\x1b[32m[SUCCESS]\x1b[0m Cache generation completed in {:.2}s - ready for testing",
-                 duration.as_secs_f64());
+
+        println!(
+            "\x1b[32m[SUCCESS]\x1b[0m Generated {} in {} directories",
+            human_readable_size(total_actual),
+            directories.len()
+        );
+        println!(
+            "\x1b[32m[SUCCESS]\x1b[0m Cache generation completed in {:.2}s - ready for testing",
+            duration.as_secs_f64()
+        );
 
         Ok(())
     }
 
     fn clean(&self) -> io::Result<()> {
         println!("Cleaning up generated cache files...");
-        
+
         if self.cache_dir.exists() {
-            print!("Delete all contents of {}? (y/N): ", self.cache_dir.display());
+            print!(
+                "Delete all contents of {}? (y/N): ",
+                self.cache_dir.display()
+            );
             io::stdout().flush()?;
 
             let mut input = String::new();
@@ -338,24 +379,25 @@ impl Clone for CacheGenerator {
 fn human_readable_size(bytes: u64) -> String {
     const UNITS: &[&str] = &["B", "KB", "MB", "GB"];
     const THRESHOLD: f64 = 1024.0;
-    
+
     if bytes == 0 {
         return "0 B".to_string();
     }
-    
+
     let mut size = bytes as f64;
     let mut unit_index = 0;
-    
+
     while unit_index < UNITS.len() - 1 && size >= THRESHOLD {
         size /= THRESHOLD;
         unit_index += 1;
     }
-    
+
     format!("{:.1} {}", size, UNITS[unit_index])
 }
 
 fn show_help() {
-    println!(r#"
+    println!(
+        r#"
 Usage: cache_generator [OPTIONS]
 
 Generate fake cache entries in ~/.cache for testing cache cleaning tools.
@@ -376,7 +418,9 @@ NOTES:
     - Files are created only in the current user's ~/.cache directory
     - Uses parallel processing for faster generation
     - Generated files have realistic names and content types
-"#, human_readable_size(MAX_TOTAL_SIZE));
+"#,
+        human_readable_size(MAX_TOTAL_SIZE)
+    );
 }
 
 fn main() -> io::Result<()> {
