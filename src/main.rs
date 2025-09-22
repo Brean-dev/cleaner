@@ -34,9 +34,9 @@ fn top_level_cache_dirs(mut dirs: Vec<PathBuf>) -> Vec<PathBuf> {
     let mut top_level = Vec::new();
 
     for dir in dirs {
-        let is_nested = top_level.iter().any(|parent: &PathBuf| {
-            dir.starts_with(parent) && dir != *parent
-        });
+        let is_nested = top_level
+            .iter()
+            .any(|parent: &PathBuf| dir.starts_with(parent) && dir != *parent);
 
         if !is_nested {
             top_level.push(dir);
@@ -65,19 +65,19 @@ fn total_size<P: AsRef<Path>>(paths: &[P]) -> u64 {
 fn human_size(bytes: u64) -> String {
     const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
     const THRESHOLD: f64 = 1024.0;
-    
+
     if bytes == 0 {
         return "0 B".to_string();
     }
-    
+
     let mut size = bytes as f64;
     let mut unit_index = 0;
-    
+
     while unit_index < UNITS.len() - 1 && size >= THRESHOLD {
         size /= THRESHOLD;
         unit_index += 1;
     }
-    
+
     format!("{:.2} {}", size, UNITS[unit_index])
 }
 
@@ -155,8 +155,13 @@ fn main() -> io::Result<()> {
                 let results = clean_cache_dirs(&cache_dirs);
                 display_cleaning_results(&results);
 
-                let successful_cleanups = results.iter().filter(|(_, result)| result.is_ok()).count();
-                println!("\nSuccessfully cleaned {}/{} directories", successful_cleanups, cache_dirs.len());
+                let successful_cleanups =
+                    results.iter().filter(|(_, result)| result.is_ok()).count();
+                println!(
+                    "\nSuccessfully cleaned {}/{} directories",
+                    successful_cleanups,
+                    cache_dirs.len()
+                );
             }
             false => println!("Cleaning aborted."),
         }
