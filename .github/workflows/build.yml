@@ -7,8 +7,12 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:  # For manual triggering
-
+  workflow_dispatch:
+      inputs:
+        tag:
+          description: 'Tag for this build'
+          required: true
+          default: 'v0.1.0'
 jobs:
   release:
     runs-on: ubuntu-latest
