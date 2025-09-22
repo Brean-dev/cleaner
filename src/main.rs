@@ -537,12 +537,6 @@ fn display_summary(cache_dirs: &[PathBuf], total_size_bytes: u64, root: &str) {
 fn main() -> io::Result<()> {
     let matches = build_cli().get_matches();
 
-    // Handle version flag
-    if matches.get_flag("version") {
-        println!("{} {}", PKG_NAME, VERSION);
-        return Ok(());
-    }
-
     let root = matches.get_one::<String>("path").unwrap();
     let clean_mode = matches.get_flag("clean");
 
