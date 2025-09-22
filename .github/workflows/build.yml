@@ -128,8 +128,6 @@ jobs:
           Maintainer: ${AUTHORS} <noreply@github.com>
           Description: ${DESCRIPTION}
            ${DESCRIPTION}.
-           This utility helps developers clean up disk space by finding and
-           removing unused node_modules directories.
           EOF
 
           # Build the deb package
@@ -171,8 +169,7 @@ jobs:
 
           %description
           ${DESCRIPTION}.
-          This utility helps developers clean up disk space by finding and
-          removing unused node_modules directories.
+
 
           %prep
 
