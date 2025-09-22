@@ -62,22 +62,28 @@ detect_distro() {
 
 # Get latest release tag
 get_latest_release() {
-    curl -s "$GITHUB_API/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/'
+    local response=$(curl -s "$GITHUB_API/releases/latest")
+    if [ $? -ne 0 ] || [ -z "$response" ]; then
+        print_error "Failed to fetch release information from GitHub API"
+        return 1
+    fi
+    echo "$response" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/'
 }
 
 # Download and install based on distro
 install_cleaner() {
     local arch=$(detect_arch)
     local distro=$(detect_distro)
-    local version=$(get_latest_release)
 
+    print_status "Detected architecture: $arch"
+    print_status "Detected distribution: $distro"
+
+    local version=$(get_latest_release)
     if [ -z "$version" ]; then
         print_error "Failed to get latest release version"
         exit 1
     fi
 
-    print_status "Detected architecture: $arch"
-    print_status "Detected distribution: $distro"
     print_status "Latest version: $version"
 
     local base_url="https://github.com/$REPO/releases/download/$version"
@@ -127,9 +133,10 @@ install_cleaner() {
     local download_url="$base_url/$filename"
     local temp_file="/tmp/$filename"
 
-    print_status "Downloading $filename..."
-    if ! curl -L -o "$temp_file" "$download_url"; then
+    print_status "Downloading $filename from $download_url..."
+    if ! curl -L -f -o "$temp_file" "$download_url"; then
         print_error "Failed to download $filename"
+        print_error "URL: $download_url"
         exit 1
     fi
 
@@ -137,12 +144,16 @@ install_cleaner() {
 
     if [ "$install_cmd" = "install_binary" ]; then
         # Install binary directly
-        sudo install -m 755 "$temp_file" /usr/local/bin/cleaner
+        if ! sudo install -m 755 "$temp_file" /usr/local/bin/cleaner; then
+            print_error "Failed to install binary to /usr/local/bin/cleaner"
+            rm -f "$temp_file"
+            exit 1
+        fi
         print_status "Cleaner installed to /usr/local/bin/cleaner"
     else
         # Install package
         if ! $install_cmd "$temp_file"; then
-            print_error "Failed to install package"
+            print_error "Failed to install package with: $install_cmd"
             rm -f "$temp_file"
             exit 1
         fi
@@ -156,9 +167,11 @@ install_cleaner() {
 
     # Verify installation
     if command -v cleaner &> /dev/null; then
-        print_status "Verification: $(cleaner --version 2>/dev/null || echo 'cleaner command is available')"
+        local version_output=$(cleaner --version 2>/dev/null || cleaner -V 2>/dev/null || echo 'cleaner command is available')
+        print_status "Verification: $version_output"
     else
         print_warning "cleaner command not found in PATH. You may need to restart your shell or add /usr/local/bin to your PATH"
+        print_status "Try running: export PATH=\"/usr/local/bin:\$PATH\""
     fi
 }
 
@@ -175,6 +188,7 @@ check_dependencies() {
 
 # Main execution
 main() {
+    print_status "Starting installation process..."
     check_dependencies
     install_cleaner
 }
