@@ -74,17 +74,12 @@ get_latest_release() {
 install_cleaner() {
     local arch=$(detect_arch)
     local distro=$(detect_distro)
-
-    print_status "Detected architecture: $arch"
-    print_status "Detected distribution: $distro"
-
     local version=$(get_latest_release)
+
     if [ -z "$version" ]; then
         print_error "Failed to get latest release version"
         exit 1
     fi
-
-    print_status "Latest version: $version"
 
     local base_url="https://github.com/$REPO/releases/download/$version"
     local filename=""
@@ -118,12 +113,10 @@ install_cleaner() {
             fi
             ;;
         arch|manjaro)
-            # For Arch-based distros, use the binary
             filename="cleaner-$arch-linux"
             install_cmd="install_binary"
             ;;
         *)
-            # Default to binary for other distros
             print_warning "Distribution not specifically supported, using binary installation"
             filename="cleaner-$arch-linux"
             install_cmd="install_binary"
@@ -133,44 +126,35 @@ install_cleaner() {
     local download_url="$base_url/$filename"
     local temp_file="/tmp/$filename"
 
-    print_status "Downloading $filename from $download_url..."
-    if ! curl -L -f -o "$temp_file" "$download_url"; then
+    if ! curl -L -f -o "$temp_file" "$download_url" 2>/dev/null; then
         print_error "Failed to download $filename"
-        print_error "URL: $download_url"
         exit 1
     fi
 
-    print_status "Installing cleaner..."
-
     if [ "$install_cmd" = "install_binary" ]; then
-        # Install binary directly
-        if ! sudo install -m 755 "$temp_file" /usr/local/bin/cleaner; then
+        if ! sudo install -m 755 "$temp_file" /usr/local/bin/cleaner 2>/dev/null; then
             print_error "Failed to install binary to /usr/local/bin/cleaner"
             rm -f "$temp_file"
             exit 1
         fi
-        print_status "Cleaner installed to /usr/local/bin/cleaner"
     else
-        # Install package
-        if ! $install_cmd "$temp_file"; then
-            print_error "Failed to install package with: $install_cmd"
+        if ! $install_cmd "$temp_file" 2>/dev/null; then
+            print_error "Failed to install package"
             rm -f "$temp_file"
             exit 1
         fi
     fi
 
-    # Clean up
     rm -f "$temp_file"
 
     print_status "Installation completed successfully!"
-    print_status "You can now run 'cleaner' command"
 
     # Verify installation
     if command -v cleaner &> /dev/null; then
-        local version_output=$(cleaner --version 2>/dev/null || cleaner -V 2>/dev/null || echo 'cleaner command is available')
-        print_status "Verification: $version_output"
+        print_status "Cleaner installed and available in PATH"
+        print_status "Run 'cleaner' to start cleaning cache directories"
     else
-        print_warning "cleaner command not found in PATH. You may need to restart your shell or add /usr/local/bin to your PATH"
+        print_warning "cleaner command not found in PATH"
         print_status "Try running: export PATH=\"/usr/local/bin:\$PATH\""
     fi
 }
@@ -188,7 +172,6 @@ check_dependencies() {
 
 # Main execution
 main() {
-    print_status "Starting installation process..."
     check_dependencies
     install_cleaner
 }
