@@ -170,13 +170,6 @@ check_dependencies() {
     done
 }
 
-# Main execution
-main() {
-    check_dependencies
-    install_cleaner
-}
-
-# Run if script is executed directly
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    main "$@"
-fi
+# Main execution - always run when script is executed
+check_dependencies
+install_cleaner
