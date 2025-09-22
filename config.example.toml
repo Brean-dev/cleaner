@@ -1,0 +1,196 @@
+# Advanced Linux Cache Cleaner Configuration
+# This file controls the behavior of the cache cleaner tool
+# Location: ~/.config/cleaner/config.toml
+
+# Cache detection patterns - these control what directories and files are considered cache
+[cache_patterns]
+
+# User-level cache directories (under $HOME)
+# These follow XDG Base Directory specifications and common application patterns
+user_cache_dirs = [
+    ".cache",                           # XDG user cache directory
+    ".local/share/Trash",              # User trash directory
+    ".thumbnails",                     # Image thumbnails
+    ".mozilla/firefox/*/Cache",        # Firefox cache
+    ".config/google-chrome/*/Cache",   # Chrome cache
+    ".config/chromium/*/Cache",        # Chromium cache
+    ".vscode/CachedExtensions",        # VS Code cached extensions
+    ".vscode/logs",                    # VS Code logs
+    ".config/*/cache",                 # Generic app cache directories
+    ".local/share/*/cache",            # XDG-compliant app caches
+]
+
+# System-wide cache directories
+system_cache_dirs = [
+    "/var/cache",                      # System cache directory
+    "/var/tmp",                        # Variable temporary files
+    "/tmp",                            # Temporary files
+    "/var/lib/apt/lists",              # APT package lists (Debian/Ubuntu)
+    "/var/cache/apt",                  # APT cache
+    "/var/cache/fontconfig",           # Font cache
+    "/var/cache/man",                  # Manual page cache
+]
+
+# Application-specific cache patterns
+# These use wildcards to match various cache directory structures
+app_cache_patterns = [
+    "*/.cache",                        # Hidden cache directories
+    "*/cache",                         # Cache subdirectories
+    "*/Cache",                         # Capitalized cache directories
+    "*/.thumbnails",                   # Thumbnail caches
+    "*/thumbnails",                    # Thumbnail directories
+]
+
+# Package manager cache directories
+# These contain downloaded packages and build caches
+package_manager_caches = [
+    "/var/cache/pacman/pkg",           # Arch Linux pacman cache
+    "/var/cache/apt/archives",         # Debian/Ubuntu APT cache
+    "/var/cache/yum",                  # RHEL/CentOS YUM cache
+    "/var/cache/dnf",                  # Fedora DNF cache
+    "/var/cache/zypper",               # openSUSE Zypper cache
+    "~/.cache/pip",                    # Python pip cache
+    "~/.npm/_cacache",                 # Node.js npm cache
+    "~/.cargo/registry/cache",         # Rust cargo cache
+    "~/.gradle/caches",                # Gradle build cache
+    "~/.m2/repository",                # Maven repository cache
+]
+
+# Development tool caches
+# These are created by development tools and build systems
+dev_tool_caches = [
+    "node_modules/.cache",             # Node.js module cache
+    "target/debug",                    # Rust debug builds
+    "target/release",                  # Rust release builds (be careful!)
+    "build",                           # Generic build directories
+    "dist",                            # Distribution directories
+    ".pytest_cache",                   # Python pytest cache
+    "__pycache__",                     # Python bytecode cache
+    ".mypy_cache",                     # MyPy type checker cache
+    ".tox",                            # Python tox environments
+    ".coverage",                       # Python coverage data
+]
+
+# Browser cache patterns
+# These target specific browser cache locations
+browser_caches = [
+    ".mozilla/firefox/*/cache2",       # Firefox cache2
+    ".config/google-chrome/*/Cache",   # Google Chrome cache
+    ".config/chromium/*/Cache",        # Chromium cache
+    ".opera/cache",                    # Opera cache
+    ".config/BraveSoftware/*/Cache",   # Brave browser cache
+]
+
+# Temporary file patterns
+# These match common temporary file and directory names
+temp_patterns = [
+    "tmp",                             # Temporary directories
+    "temp",                            # Temporary directories
+    "temporary",                       # Temporary directories
+    ".tmp",                            # Hidden temporary directories
+    ".temp",                           # Hidden temporary directories
+]
+
+# Build artifact patterns
+# These match compiled files and build outputs
+build_artifacts = [
+    "*.o",                             # Object files
+    "*.so",                            # Shared libraries
+    "*.a",                             # Static libraries
+    "*.pyc",                           # Python compiled files
+    "*.pyo",                           # Python optimized files
+    "*.class",                         # Java class files
+    "*.dSYM",                          # macOS debug symbols
+]
+
+# Log file cleanup configuration
+[log_cleanup]
+
+# Enable log file cleanup (set to false to disable)
+enabled = true
+
+# Maximum age for log files in days
+# Log files older than this will be considered for deletion
+max_age_days = 7
+
+# Directories to search for log files
+# Supports wildcards and ~ for home directory
+log_patterns = [
+    "/var/log",                        # System log directory
+    "~/.local/share/*/logs",           # User application logs
+    "~/.config/*/logs",                # Application configuration logs
+    "/tmp/*.log",                      # Temporary log files
+    "/var/tmp/*.log",                  # Variable temporary logs
+]
+
+# File extensions that are considered log files
+log_extensions = [
+    "log",                             # Standard log extension
+    "LOG",                             # Uppercase log extension
+    "logs",                            # Plural logs
+    "out",                             # Output files
+    "err",                             # Error files
+    "debug",                           # Debug files
+    "trace",                           # Trace files
+]
+
+# Minimum size for log files to be considered for cleanup (in bytes)
+# This prevents deletion of small log files that might be important
+min_size_bytes = 1024
+
+# Safety configuration
+# These settings help prevent accidental deletion of important files
+[safety]
+
+# Directories to always exclude from cleaning
+# These paths will never be scanned or cleaned
+exclude_paths = [
+    "/.git",                           # Git repository data
+    "/.svn",                           # Subversion repository data
+    "/.hg",                            # Mercurial repository data
+    "/proc",                           # Process filesystem
+    "/sys",                            # System filesystem
+    "/dev",                            # Device files
+    "/run",                            # Runtime data
+    "/boot",                           # Boot files
+    "/etc",                            # System configuration
+    "/usr",                            # User programs
+    "/lib",                            # System libraries
+    "/lib64",                          # 64-bit system libraries
+    "/bin",                            # Essential binaries
+    "/sbin",                           # System binaries
+]
+
+# Size threshold for confirmation prompts (in bytes)
+# If the total deletion size exceeds this, user confirmation will be required
+confirm_threshold_bytes = 104857600  # 100MB
+
+# Maximum number of files to delete in one operation
+# This prevents runaway deletions
+max_files_per_operation = 10000
+
+# Enable dry run mode by default (set to true for testing)
+dry_run = false
+
+# Create a backup list of deleted items
+create_backup_list = true
+
+# Performance configuration
+# These settings control how the tool uses system resources
+[performance]
+
+# Maximum number of threads to use (comment out for auto-detect)
+# Set to a specific number to limit resource usage
+# max_threads = 4
+
+# Timeout for directory access in seconds
+# How long to wait before considering a directory inaccessible
+access_timeout_secs = 5
+
+# Skip symbolic links during scanning
+# This can improve performance and avoid following loops
+skip_symlinks = true
+
+# Maximum depth for directory traversal
+# Limits how deep into directory structures the tool will scan
+max_depth = 10
