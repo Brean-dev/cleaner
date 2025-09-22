@@ -16,6 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      workflows: write
 
     steps:
     - uses: actions/checkout@v4
@@ -49,23 +50,10 @@ jobs:
 
     - name: Tag this build
       if: github.event.inputs.tag != ''
-      uses: actions/github-script@v6
-      with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        script: |
-          const tag = '${{ github.event.inputs.tag }}';
-          const message = 'Release ' + tag;
-
-          github.rest.git.createRef({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            ref: `refs/tags/${tag}`,
-            sha: context.sha
-          }).catch(error => {
-            console.log(`Error creating tag: ${error.message}`);
-            if (error.message.includes('Reference already exists')) {
-              console.log('Tag already exists, continuing...');
-              return;
-            }
-            throw error;
-          });
+      env:
+        GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+      run: |
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+        git tag ${{ github.event.inputs.tag }}
+        git push origin ${{ github.event.inputs.tag }}
