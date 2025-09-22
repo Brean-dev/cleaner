@@ -1,0 +1,51 @@
+name: Rust Build - Linux
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag for this build'
+        required: true
+        default: 'v0.1.0'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: stable
+        override: true
+
+    - name: Install Linux dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential
+
+    - name: Build
+      run: cargo build --verbose
+
+    - name: Run tests
+      run: cargo test --verbose
+
+    - name: Check formatting
+      run: cargo fmt -- --check
+
+    - name: Run clippy
+      run: cargo clippy -- -D warnings
+
+    - name: Tag this build
+      if: github.event.inputs.tag != ''
+      run: |
+        git config --local user.email "Brean-dev@Brean-dev.com"
+        git config --local user.name "Brean-dev"
+        git tag -a ${{ github.event.inputs.tag }} -m "Release ${{ github.event.inputs.tag }}"
+        git push origin ${{ github.event.inputs.tag }}
