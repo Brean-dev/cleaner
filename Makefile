@@ -37,7 +37,6 @@ build-cache:
 	@cd tools/cache_generator && cargo build --release
 
 generate-cache: build-cache
-	@echo "Generating fake cache files..."
 	@tools/cache_generator/target/release/cache_generator
 
 clean-cache: build-cache
