@@ -53,6 +53,35 @@ impl CacheDetector {
         Self { config }
     }
 
+    /// Check if a directory contains any code files
+    fn directory_contains_code_files(&self, path: &Path) -> bool {
+        if path.is_file() {
+            return self.is_code_file(path);
+        }
+
+        // For directories, do a quick check for code files
+        if let Ok(entries) = std::fs::read_dir(path) {
+            for entry in entries.flatten() {
+                let entry_path = entry.path();
+                if entry_path.is_file() && self.is_code_file(&entry_path) {
+                    return true;
+                }
+                // Check one level deep for common code file patterns
+                if entry_path.is_dir()
+                    && let Ok(sub_entries) = std::fs::read_dir(&entry_path)
+                {
+                    for sub_entry in sub_entries.flatten().take(10) {
+                        // Limit to avoid performance issues
+                        if sub_entry.path().is_file() && self.is_code_file(&sub_entry.path()) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
     /// Detect all cache items under the given root path
     pub fn detect_cache_items<P: AsRef<Path>>(
         &self,
@@ -69,6 +98,13 @@ impl CacheDetector {
 
         // Detect temporary files
         cache_items.extend(self.detect_temporary_files(root_path)?);
+
+        // RETROACTIVELY REMOVE ANY ITEMS WITH CODE EXTENSIONS OR CONTAINING CODE FILES
+        // This ensures that no matter which detection method found them,
+        // code files and directories containing code files are excluded from the final results
+        cache_items.retain(|item| {
+            !self.is_code_file(&item.path) && !self.directory_contains_code_files(&item.path)
+        });
 
         // Remove duplicates and sort by type
         self.deduplicate_and_sort(cache_items)
