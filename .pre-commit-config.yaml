@@ -30,7 +30,7 @@ repos:
 
       - id: deny
         name: Cargo deny
-        entry: cargo deny check
+        entry: cargo deny check advisories bans sources
         language: system
         pass_filenames: false
         types: [rust]
