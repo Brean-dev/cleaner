@@ -1,0 +1,36 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+
+  - repo: https://github.com/doublify/pre-commit-rust
+    rev: v1.0
+    hooks:
+      - id: fmt
+        args: ['--verbose', '--']
+      - id: cargo-check
+        args: ['--workspace']
+      - id: clippy
+        args: ['--workspace', '--all-targets', '--all-features', '--', '-D', 'warnings']
+
+  - repo: local
+    hooks:
+      - id: audit
+        name: Security audit
+        entry: cargo audit
+        language: system
+        pass_filenames: false
+        types: [rust]
+
+      - id: deny
+        name: Cargo deny
+        entry: cargo deny check
+        language: system
+        pass_filenames: false
+        types: [rust]
