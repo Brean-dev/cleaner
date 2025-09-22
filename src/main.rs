@@ -1,3 +1,4 @@
+use clap::{Arg, Command};
 use colored::*;
 use std::{
     env, fs,
@@ -7,6 +8,30 @@ use std::{
     thread,
 };
 use walkdir::{DirEntry, WalkDir};
+
+// Version information
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+const PKG_NAME: &str = env!("CARGO_PKG_NAME");
+
+/// Build command line interface
+fn build_cli() -> Command {
+    Command::new(PKG_NAME)
+        .version(VERSION)
+        .about("A fast parallel cache directory cleaner")
+        .author("Brean-dev")
+        .arg(
+            Arg::new("path")
+                .help("Root path to scan for cache directories")
+                .default_value("/")
+                .index(1),
+        )
+        .arg(
+            Arg::new("clean")
+                .long("clean")
+                .help("Actually delete the found cache directories")
+                .action(clap::ArgAction::SetTrue),
+        )
+}
 
 /// Check if running with root privileges
 fn check_root_privileges() -> bool {
@@ -510,9 +535,16 @@ fn display_summary(cache_dirs: &[PathBuf], total_size_bytes: u64, root: &str) {
 }
 
 fn main() -> io::Result<()> {
-    let args: Vec<String> = env::args().collect();
-    let root = args.get(1).map(String::as_str).unwrap_or("/");
-    let clean_mode = args.iter().any(|arg| arg == "--clean");
+    let matches = build_cli().get_matches();
+
+    // Handle version flag
+    if matches.get_flag("version") {
+        println!("{} {}", PKG_NAME, VERSION);
+        return Ok(());
+    }
+
+    let root = matches.get_one::<String>("path").unwrap();
+    let clean_mode = matches.get_flag("clean");
 
     // Check if scanning system-wide but not running as root
     if root == "/" && !check_root_privileges() {
